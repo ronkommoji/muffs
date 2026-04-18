@@ -1,0 +1,38 @@
+app = "muffs"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[mounts]
+  source = "muffs_data"
+  destination = "/data"
+
+[env]
+  DB_PATH = "/data/muffs.db"
+  NEXT_PUBLIC_APP_URL = "https://muffs.fly.dev"
+
+[[services]]
+  internal_port = 3000
+  protocol = "tcp"
+
+  [services.concurrency]
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.ports]]
+    force_https = true
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+[[processes]]
+  name = "web"
+  command = "node dashboard/.next/standalone/server.js"
+
+[[processes]]
+  name = "worker"
+  command = "python agent/agent.py"

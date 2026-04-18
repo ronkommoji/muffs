@@ -1,0 +1,30 @@
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+dashboard/.next/
+dashboard/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Fly.io
+fly.toml.bak
