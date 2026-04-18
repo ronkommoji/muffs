@@ -89,7 +89,7 @@ export default function SettingsPage() {
 
   async function loadContextUsage() {
     try {
-      const res = await fetch("http://localhost:8000/context");
+      const res = await fetch("/api/context");
       setContextUsage(await res.json());
     } catch {}
   }

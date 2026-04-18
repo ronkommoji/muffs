@@ -44,6 +44,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const lastAssistantIdRef = useRef<number | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = useCallback(async () => {
@@ -96,11 +97,16 @@ export default function ChatPage() {
     const content = input.trim();
     setInput("");
     setIsTyping(true);
+
+    // Clear typing indicator after 90s in case the agent silently fails
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 90_000);
+
     fetch("/api/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: activeSession, content }),
-    }).catch(() => {});
+    }).catch(() => setIsTyping(false));
     setSending(false);
   }
 
