@@ -51,7 +51,8 @@ export default function RoutinesPage() {
   }
 
   async function runNow(id: number) {
-    await fetch(`http://localhost:8000/routine/run/${id}`, { method: "POST" });
+    await fetch(`/api/routines/${id}/run`, { method: "POST" });
+    load();
   }
 
   async function remove(id: number) {

@@ -36,7 +36,7 @@ const RECURRENCE_OPTIONS = [
   { label: "Custom cron", cron: "custom" },
 ];
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4;
 
 export default function NewRoutinePage() {
   const router = useRouter();
@@ -107,7 +107,7 @@ export default function NewRoutinePage() {
 
       {/* Step indicator */}
       <div className="flex gap-2">
-        {[1, 2, 3, 4, 5].map((s) => (
+        {[1, 2, 3, 4].map((s) => (
           <div
             key={s}
             className={`h-1.5 flex-1 rounded-full transition-colors ${

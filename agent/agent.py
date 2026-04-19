@@ -9,7 +9,7 @@ import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -248,7 +248,7 @@ async def run_agent(
 
     # dashboard_session_id: the ID used for DB message storage (stays constant)
     # sdk_session_id: the ID the Claude SDK assigns (used for resumption)
-    dashboard_session_id = session_id or f"sess_{int(datetime.utcnow().timestamp() * 1000)}"
+    dashboard_session_id = session_id or f"sess_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
     sdk_session_id: str | None = None
 
     # If resuming, we need to pass the SDK's own session ID, not the dashboard one
@@ -364,12 +364,17 @@ def _reload_routines():
     scheduler.remove_all_jobs()
     routines = _db_get_enabled_routines()
     for r in routines:
+        try:
+            cron_kwargs = _parse_cron(r["schedule_cron"])
+        except ValueError as e:
+            print(f"Routine {r['id']} skipped — {e}")
+            continue
         scheduler.add_job(
             run_routine,
             "cron",
             args=[r["id"]],
             id=f"routine_{r['id']}",
-            **_parse_cron(r["schedule_cron"]),
+            **cron_kwargs,
             timezone=r.get("timezone", "UTC"),
             replace_existing=True,
         )
@@ -378,7 +383,7 @@ def _reload_routines():
 def _parse_cron(expr: str) -> dict:
     parts = expr.strip().split()
     if len(parts) != 5:
-        return {"minute": "*"}
+        raise ValueError(f"Invalid cron expression (expected 5 fields): {expr!r}")
     keys = ["minute", "hour", "day", "month", "day_of_week"]
     return dict(zip(keys, parts))
 
@@ -420,7 +425,7 @@ class ConnectIntegrationRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
 
 
 @app.post("/run")
@@ -449,11 +454,20 @@ async def new_session():
 async def context_usage():
     from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-    session_id = await asyncio.to_thread(_db_get_active_session)
-    if not session_id:
+    dashboard_session_id = await asyncio.to_thread(_db_get_active_session)
+    if not dashboard_session_id:
         return {"percentage": 0, "totalTokens": 0, "maxTokens": 0}
 
-    options = ClaudeAgentOptions(resume=session_id)
+    # Must resume with the SDK's own session ID, not the dashboard one
+    with _get_db() as conn:
+        row = conn.execute(
+            "SELECT sdk_session_id FROM sessions WHERE id=?", (dashboard_session_id,)
+        ).fetchone()
+    sdk_session_id = row[0] if row and row[0] else None
+    if not sdk_session_id:
+        return {"percentage": 0, "totalTokens": 0, "maxTokens": 0}
+
+    options = ClaudeAgentOptions(resume=sdk_session_id)
     async with ClaudeSDKClient(options=options) as client:
         usage = await client.get_context_usage()
     return usage
