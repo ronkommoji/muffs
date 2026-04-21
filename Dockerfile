@@ -17,9 +17,9 @@ COPY --from=dashboard-builder /app/dashboard/.next /app/dashboard/.next
 COPY --from=dashboard-builder /app/dashboard/node_modules /app/dashboard/node_modules
 COPY --from=dashboard-builder /app/dashboard/package.json /app/dashboard/package.json
 
-COPY agent/ ./agent/
+COPY agentMuffs/ ./agentMuffs/
 COPY db/ ./db/
 
 EXPOSE 3000 8000
 
-CMD ["sh", "-c", "python agent/agent.py & cd dashboard && node_modules/.bin/next start -p 3000"]
+CMD ["sh", "-c", "python -m uvicorn agentMuffs.agent:app --host 0.0.0.0 --port 8000 & cd dashboard && node_modules/.bin/next start -p 3000"]

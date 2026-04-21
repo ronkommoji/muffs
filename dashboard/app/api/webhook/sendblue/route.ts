@@ -1,4 +1,6 @@
-import { getDb, getSetting, maybeSetSessionTitleFromFirstMessage } from "@/lib/db";
+import { getPythonAgentUrl } from "@/lib/config";
+import { getDb, maybeSetSessionTitleFromFirstMessage } from "@/lib/db";
+import { getSendblueEnv } from "@/lib/sendblue";
 
 export const dynamic = "force-dynamic";
 
@@ -8,21 +10,31 @@ export async function POST(req: Request) {
 
   if (!content) return Response.json({ ok: false, error: "no content" });
 
-  const configuredTo = getSetting("sendblue_to");
+  const configuredTo = getSendblueEnv().toNumber;
   if (configuredTo && from_number !== configuredTo) {
     return Response.json({ ok: false, error: "unknown sender" }, { status: 403 });
   }
 
   const db = getDb();
 
-  // Ensure an active session exists
-  let session = db
-    .prepare("SELECT id FROM sessions WHERE status='active' ORDER BY updated_at DESC LIMIT 1")
-    .get() as { id: string } | undefined;
-
+  const pinned = process.env.MUFFS_SENDBLUE_SESSION_ID?.trim();
+  let session: { id: string } | undefined;
+  if (pinned) {
+    const row = db.prepare("SELECT id FROM sessions WHERE id = ?").get(pinned) as
+      | { id: string }
+      | undefined;
+    if (row) session = row;
+  }
+  if (!session) {
+    session = db
+      .prepare("SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1")
+      .get() as { id: string } | undefined;
+  }
   if (!session) {
     const id = `sess_${Date.now()}`;
-    db.prepare("INSERT INTO sessions (id, status) VALUES (?, 'active')").run(id);
+    db.prepare("INSERT INTO sessions (id, status, kind) VALUES (?, 'active', 'general')").run(
+      id
+    );
     session = { id };
   }
 
@@ -32,12 +44,10 @@ export async function POST(req: Request) {
   ).run(session.id, content);
   maybeSetSessionTitleFromFirstMessage(session.id);
 
-  const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
+  const agentUrl = getPythonAgentUrl();
 
   // Send typing indicator immediately so iMessage shows "..." bubble
-  const apiKeyId = getSetting("sendblue_api_key") || process.env.SENDBLUE_API_KEY_ID || "";
-  const apiSecret = getSetting("sendblue_api_secret") || process.env.SENDBLUE_API_SECRET_KEY || "";
-  const fromNumber = getSetting("sendblue_from") || process.env.SENDBLUE_FROM_NUMBER || "";
+  const { apiKeyId, apiSecretKey: apiSecret, fromNumber } = getSendblueEnv();
   if (apiKeyId && apiSecret && fromNumber && from_number) {
     fetch("https://api.sendblue.com/api/send-typing-indicator", {
       method: "POST",

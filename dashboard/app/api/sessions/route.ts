@@ -1,6 +1,9 @@
+import { getPythonAgentUrl } from "@/lib/config";
 import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+
+const KINDS = new Set(["general", "automation_creator"]);
 
 export async function GET() {
   const sessions = getDb()
@@ -9,17 +12,23 @@ export async function GET() {
   return Response.json(sessions);
 }
 
-export async function POST() {
-  // Close all active sessions and create a new one
+export async function POST(req: Request) {
+  let kind = "general";
+  try {
+    const body = await req.json();
+    if (body && typeof body.kind === "string" && KINDS.has(body.kind)) {
+      kind = body.kind;
+    }
+  } catch {
+    /* empty body */
+  }
+
   const db = getDb();
-  db.prepare("UPDATE sessions SET status='closed' WHERE status='active'").run();
-
   const id = `sess_${Date.now()}`;
-  db.prepare("INSERT INTO sessions (id, status) VALUES (?, 'active')").run(id);
+  db.prepare("INSERT INTO sessions (id, status, kind) VALUES (?, 'active', ?)").run(
+    id,
+    kind
+  );
 
-  // Notify agent to clear its in-memory session
-  const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
-  await fetch(`${agentUrl}/new-session`, { method: "POST" }).catch(() => {});
-
-  return Response.json({ id });
+  return Response.json({ id, kind });
 }

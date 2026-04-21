@@ -1,3 +1,4 @@
+import { getPythonAgentUrl } from "@/lib/config";
 import { getDb, maybeSetSessionTitleFromFirstMessage } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export async function GET(req: Request) {
 
   const sessions = db
     .prepare(
-      `SELECT s.id, s.created_at, s.status, s.title,
+      `SELECT s.id, s.created_at, s.status, s.title, s.kind,
               s.token_count, s.context_percentage, s.context_max_tokens,
               m.content as preview, m.role as preview_role,
               fm.content as first_message
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
   maybeSetSessionTitleFromFirstMessage(session_id);
 
   // Fire-and-forget: agent writes the response back to DB, chat polls pick it up
-  const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
+  const agentUrl = getPythonAgentUrl();
   fetch(`${agentUrl}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -1,33 +1,25 @@
-import { getDb, getSetting, setSetting } from "@/lib/db";
+import { writePreferencesMirror } from "@/lib/preferences-file";
 
 export const dynamic = "force-dynamic";
 
-const SETTING_KEYS = [
-  "personality_notes",
-  "response_style",
-  "tone_adjustments",
-  "off_limits_topics",
-  "sendblue_api_key",
-  "sendblue_api_secret",
-  "sendblue_from",
-  "sendblue_to",
-  "auto_rotate_session",
-];
-
+/**
+ * Legacy route. Profile and personality are edited in workspace/memory/*.md, not SQLite.
+ * Optional PUT only updates operational keys in preferences.json (e.g. mirrors from other flows).
+ */
 export async function GET() {
-  const result: Record<string, string> = {};
-  for (const key of SETTING_KEYS) {
-    result[key] = getSetting(key);
-  }
-  return Response.json(result);
+  return Response.json({});
 }
 
 export async function PUT(req: Request) {
-  const body = await req.json();
-  for (const [key, value] of Object.entries(body)) {
-    if (SETTING_KEYS.includes(key) && typeof value === "string") {
-      setSetting(key, value);
+  const body = (await req.json()) as Record<string, unknown>;
+  const snap: Record<string, string> = {};
+  for (const [k, v] of Object.entries(body)) {
+    if ((k === "composio_toolkits" || k === "auto_rotate_session") && typeof v === "string") {
+      snap[k] = v;
     }
+  }
+  if (Object.keys(snap).length > 0) {
+    writePreferencesMirror(snap);
   }
   return Response.json({ ok: true });
 }

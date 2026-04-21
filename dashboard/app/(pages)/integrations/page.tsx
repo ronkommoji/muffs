@@ -1,103 +1,159 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CheckCircle, Plug, Search } from "lucide-react";
 
-interface Integration {
+interface CatalogItem {
   slug: string;
   name: string;
   connected: boolean;
+  logo_url?: string | null;
+  description?: string | null;
+  tools_count?: number | null;
 }
 
-// Maps Composio toolkit slug → { displayName, clearbit domain }
-const INTEGRATION_META: Record<string, { name: string; domain: string }> = {
-  // Google
-  "gmail":              { name: "Gmail",           domain: "gmail.com" },
-  "googlecalendar":     { name: "Google Calendar", domain: "calendar.google.com" },
-  "googledrive":        { name: "Google Drive",    domain: "drive.google.com" },
-  "googledocs":         { name: "Google Docs",     domain: "docs.google.com" },
-  "googlesheets":       { name: "Google Sheets",   domain: "sheets.google.com" },
-  // Productivity
-  "notion":             { name: "Notion",          domain: "notion.so" },
-  "slack":              { name: "Slack",           domain: "slack.com" },
-  "outlook":            { name: "Outlook",         domain: "outlook.com" },
-  "linear":             { name: "Linear",          domain: "linear.app" },
-  "jira":               { name: "Jira",            domain: "atlassian.com" },
-  "trello":             { name: "Trello",          domain: "trello.com" },
-  "airtable":           { name: "Airtable",        domain: "airtable.com" },
-  // Dev
-  "github":             { name: "GitHub",          domain: "github.com" },
-  "supabase":           { name: "Supabase",        domain: "supabase.com" },
-  // CRM / Marketing
-  "hubspot":            { name: "HubSpot",         domain: "hubspot.com" },
-  // Social / Media
-  "twitter":            { name: "X (Twitter)",     domain: "twitter.com" },
-  "linkedin":           { name: "LinkedIn",        domain: "linkedin.com" },
-  "youtube":            { name: "YouTube",         domain: "youtube.com" },
-  "discord":            { name: "Discord",         domain: "discord.com" },
-  "spotify":            { name: "Spotify",         domain: "spotify.com" },
-  // AI / Search
-  "perplexityai":       { name: "Perplexity AI",   domain: "perplexity.ai" },
-  "serpapi":            { name: "SerpAPI",          domain: "serpapi.com" },
-  "firecrawl":          { name: "Firecrawl",       domain: "firecrawl.dev" },
-  "composio":           { name: "Composio",        domain: "composio.dev" },
-  // More
-  "figma":              { name: "Figma",           domain: "figma.com" },
-  "zoom":               { name: "Zoom",            domain: "zoom.us" },
-  "dropbox":            { name: "Dropbox",         domain: "dropbox.com" },
-  "stripe":             { name: "Stripe",          domain: "stripe.com" },
-  // Legacy hyphenated slugs
-  "google-calendar":    { name: "Google Calendar", domain: "calendar.google.com" },
-  "google-drive":       { name: "Google Drive",    domain: "drive.google.com" },
+/** Favicon fallback when Composio does not return a logo URL */
+const ICON_FALLBACK: Record<string, { name: string; domain: string }> = {
+  gmail: { name: "Gmail", domain: "gmail.com" },
+  googlecalendar: { name: "Google Calendar", domain: "calendar.google.com" },
+  googledrive: { name: "Google Drive", domain: "drive.google.com" },
+  googledocs: { name: "Google Docs", domain: "docs.google.com" },
+  googlesheets: { name: "Google Sheets", domain: "sheets.google.com" },
+  notion: { name: "Notion", domain: "notion.so" },
+  slack: { name: "Slack", domain: "slack.com" },
+  github: { name: "GitHub", domain: "github.com" },
 };
 
-// Canonical list shown in the grid (Composio-style slugs only, no legacy)
-const KNOWN_INTEGRATIONS = [
-  "gmail", "googlecalendar", "googledrive", "googledocs", "googlesheets",
-  "notion", "slack", "outlook", "linear", "jira", "trello", "airtable",
-  "github", "supabase", "hubspot",
-  "twitter", "linkedin", "youtube", "discord", "spotify",
-  "perplexityai",
-  "figma", "zoom", "dropbox", "stripe",
-];
+const SEARCH_DEBOUNCE_MS = 350;
 
-function IntegrationIcon({ slug }: { slug: string }) {
-  const meta = INTEGRATION_META[slug];
-  if (!meta) return <Plug className="h-5 w-5 text-muted-foreground" />;
+function slugToLabel(slug: string): string {
+  return slug
+    .replace(/[-_]/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function IntegrationIcon({
+  slug,
+  logoUrl,
+  label,
+}: {
+  slug: string;
+  logoUrl?: string | null;
+  label: string;
+}) {
+  if (logoUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={logoUrl}
+        alt=""
+        width={20}
+        height={20}
+        className="h-5 w-5 rounded object-contain shrink-0"
+      />
+    );
+  }
+  const meta = ICON_FALLBACK[slug.toLowerCase()];
+  if (meta) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={`https://www.google.com/s2/favicons?domain=${meta.domain}&sz=64`}
+        alt={meta.name}
+        width={20}
+        height={20}
+        className="shrink-0"
+      />
+    );
+  }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={`https://www.google.com/s2/favicons?domain=${meta.domain}&sz=64`}
-      alt={meta.name}
-      width={20}
-      height={20}
+    <Plug
+      className="h-5 w-5 text-muted-foreground shrink-0"
+      aria-label={label}
     />
   );
 }
 
 export default function IntegrationsPage() {
-  const [integrations, setIntegrations] = useState<Integration[]>([]);
-  const [search, setSearch] = useState("");
-  const [connecting, setConnecting] = useState<string | null>(null);
+  const [items, setItems] = useState<CatalogItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [connectedSlugs, setConnectedSlugs] = useState<Set<string>>(new Set());
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [connecting, setConnecting] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  async function load() {
-    setLoading(true);
-    const res = await fetch("/api/integrations");
-    const data = await res.json();
-    setIntegrations(data.items ?? []);
-    setLoading(false);
-    return data.items ?? [] as Integration[];
-  }
+  const pollStartedRef = useRef<number>(0);
 
   useEffect(() => {
-    load();
-  }, []);
+    const t = setTimeout(
+      () => setDebouncedSearch(searchInput.trim()),
+      SEARCH_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        params.set("limit", "48");
+        const res = await fetch(`/api/integrations?${params.toString()}`);
+        const data = await res.json();
+        if (cancelled) return;
+        setItems((data.items ?? []) as CatalogItem[]);
+        setConnectedSlugs(
+          new Set(
+            (data.connected_slugs ?? []).map((s: string) => s.toLowerCase()),
+          ),
+        );
+        setNextCursor(data.next_cursor ?? null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      params.set("cursor", nextCursor);
+      params.set("limit", "48");
+      const res = await fetch(`/api/integrations?${params.toString()}`);
+      const data = await res.json();
+      const raw = (data.items ?? []) as CatalogItem[];
+      setItems((prev) => {
+        const seen = new Set(prev.map((p) => p.slug.toLowerCase()));
+        const appended = raw.filter((r) => !seen.has(r.slug.toLowerCase()));
+        return [...prev, ...appended];
+      });
+      setConnectedSlugs(
+        new Set(
+          (data.connected_slugs ?? []).map((s: string) => s.toLowerCase()),
+        ),
+      );
+      setNextCursor(data.next_cursor ?? null);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [debouncedSearch, nextCursor, loadingMore]);
 
   async function connect(slug: string) {
     setConnecting(slug);
@@ -112,19 +168,29 @@ export default function IntegrationsPage() {
     }
     setConnecting(null);
 
-    // Poll every 2s until the integration shows as connected (up to 3 min)
     if (pollRef.current) clearInterval(pollRef.current);
-    const deadline = Date.now() + 3 * 60 * 1000;
+    pollStartedRef.current = 0;
+    const target = slug.toLowerCase();
+    const pollMs = 3 * 60 * 1000;
     pollRef.current = setInterval(async () => {
-      const res = await fetch("/api/integrations");
-      const d = await res.json();
-      const items: Integration[] = d.items ?? [];
-      setIntegrations(items);
-      const connected = items.find((i) => i.slug === slug)?.connected;
-      if (connected || Date.now() > deadline) {
+      try {
+        if (pollStartedRef.current === 0) {
+          pollStartedRef.current = performance.now();
+        }
+        const r = await fetch("/api/integrations/connection-state");
+        const d = await r.json();
+        const slugs: string[] = (d.connected_slugs ?? []).map((s: string) =>
+          s.toLowerCase(),
+        );
+        setConnectedSlugs(new Set(slugs));
+        const elapsed = performance.now() - pollStartedRef.current;
+        if (slugs.includes(target) || elapsed > pollMs) {
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+        }
+      } catch {
         clearInterval(pollRef.current!);
         pollRef.current = null;
-        setLoading(false);
       }
     }, 2000);
   }
@@ -135,116 +201,141 @@ export default function IntegrationsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: slug }),
     });
-    load();
+    setConnectedSlugs((prev) => {
+      const n = new Set(prev);
+      n.delete(slug.toLowerCase());
+      return n;
+    });
   }
 
-  const connected = integrations.filter((i) => i.connected);
-  const all = [
-    ...new Set([...integrations.map((i) => i.slug), ...KNOWN_INTEGRATIONS]),
-  ]
-    .filter((slug) =>
-      search
-        ? slug.toLowerCase().includes(search.toLowerCase()) ||
-          (INTEGRATION_META[slug]?.name ?? "").toLowerCase().includes(search.toLowerCase())
-        : true
-    )
-    .map((slug) => ({
-      slug,
-      name: INTEGRATION_META[slug]?.name ?? slug.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" "),
-      connected: integrations.find((i) => i.slug === slug)?.connected ?? false,
-    }))
-    .sort((a, b) => Number(b.connected) - Number(a.connected));
+  const fromCatalog = items.map((i) => ({
+    ...i,
+    connected: connectedSlugs.has(i.slug.toLowerCase()),
+  }));
+  const seenSlugs = new Set(fromCatalog.map((i) => i.slug.toLowerCase()));
+  const syntheticConnected: CatalogItem[] = [];
+  for (const s of connectedSlugs) {
+    if (!seenSlugs.has(s)) {
+      syntheticConnected.push({
+        slug: s,
+        name: slugToLabel(s),
+        connected: true,
+        logo_url: null,
+        description: null,
+        tools_count: null,
+      });
+    }
+  }
+  const gridItems = [...fromCatalog, ...syntheticConnected].sort(
+    (a, b) => Number(b.connected) - Number(a.connected),
+  );
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-          Connect accounts here (OAuth via Composio). For the Python agent to actually load
+          Search and connect Composio toolkits (OAuth). For the Python agent to load
           those tools over MCP, set{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">COMPOSIO_TOOLKITS</code> on
-          the agent server to the same slugs (e.g.{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">gmail,googlecalendar</code>
-          ), then restart the agent.
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">COMPOSIO_TOOLKITS</code>{" "}
+          to matching slugs (check each card; slug is shown from Composio), then restart
+          the agent.
         </p>
       </div>
-
-      {connected.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
-            Connected
-          </h2>
-          <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
-            {connected.map((i) => (
-              <Card key={i.slug}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <IntegrationIcon slug={i.slug} />
-                      <CardTitle className="text-sm">{i.name}</CardTitle>
-                    </div>
-                    <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => disconnect(i.slug)}
-                  >
-                    Disconnect
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div>
         <div className="relative mb-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Search integrations..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search Composio toolkits (name, slug, description)…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
 
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">Loading catalog…</p>
         ) : (
-          <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-            {all.map((i) => (
-              <Card key={i.slug} className={i.connected ? "border-green-500/40 bg-green-500/5" : ""}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center gap-2">
-                    <IntegrationIcon slug={i.slug} />
-                    <CardTitle className="text-sm">{i.name}</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {i.connected ? (
-                    <Badge className="bg-green-500/15 text-green-600 border-green-500/30 gap-1">
-                      <CheckCircle className="h-3 w-3" />
-                      Connected
-                    </Badge>
-                  ) : (
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      disabled={connecting === i.slug}
-                      onClick={() => connect(i.slug)}
-                    >
-                      {connecting === i.slug ? "Connecting..." : "Connect"}
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <>
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+              {gridItems.map((i) => (
+                <Card
+                  key={i.slug}
+                  className={
+                    i.connected ? "border-green-500/40 bg-green-500/5" : ""
+                  }
+                >
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start gap-2">
+                      <IntegrationIcon
+                        slug={i.slug}
+                        logoUrl={i.logo_url}
+                        label={i.name}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="text-sm leading-tight">
+                          {i.name}
+                        </CardTitle>
+                        <p className="text-[10px] text-muted-foreground font-mono truncate mt-0.5">
+                          {i.slug}
+                        </p>
+                      </div>
+                    </div>
+                    {i.description ? (
+                      <p className="text-xs text-muted-foreground line-clamp-2 pt-1">
+                        {i.description}
+                      </p>
+                    ) : null}
+                    {typeof i.tools_count === "number" ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        {i.tools_count} tools
+                      </p>
+                    ) : null}
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {i.connected ? (
+                      <>
+                        <Badge className="w-full justify-center bg-green-500/15 text-green-600 border-green-500/30 gap-1 py-1.5">
+                          <CheckCircle className="h-3 w-3" />
+                          Connected
+                        </Badge>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => disconnect(i.slug)}
+                        >
+                          Disconnect
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="w-full"
+                        disabled={connecting === i.slug}
+                        onClick={() => connect(i.slug)}
+                      >
+                        {connecting === i.slug ? "Connecting…" : "Connect"}
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            {nextCursor ? (
+              <div className="mt-6 flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingMore}
+                  onClick={() => loadMore()}
+                >
+                  {loadingMore ? "Loading…" : "Load more"}
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </div>

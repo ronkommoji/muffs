@@ -1,12 +1,12 @@
-Run the first-time onboarding flow.
+Run the Muffs first-time onboarding flow (mirrors what users text as `/setup` to the product agent).
 
-Use the prompt in `agent/prompts/setup.txt` to guide the user through a short conversation. Collect:
+Use the prompt in `agentMuffs/prompts/setup.txt` to guide the user through a short conversation. Collect:
 - Their name (how they want to be addressed)
 - Timezone
 - Communication style preference
 - Any standing context (recurring commitments, preferences, things to never bring up)
 
-After confirming with the user, write results to the User Facts section of `agent/memory/memory.md`. Do not overwrite existing Agent Notes — only update the User Facts section.
+After confirming with the user, write results to the User Facts section of `agentMuffs/memory/memory.md` (or the file at `MEMORY_PATH` if set). Do not overwrite existing Agent Notes — only update the User Facts section.
 
 Format:
 ```

@@ -1,3 +1,4 @@
+import { getPythonAgentUrl } from "@/lib/config";
 import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,7 @@ export async function PATCH(
     id
   );
 
-  const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
+  const agentUrl = getPythonAgentUrl();
   await fetch(`${agentUrl}/routine/reload`, { method: "POST" }).catch(() => {});
 
   return Response.json({ ok: true });
@@ -51,7 +52,7 @@ export async function DELETE(
   const { id } = await params;
   getDb().prepare("DELETE FROM routines WHERE id=?").run(id);
 
-  const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
+  const agentUrl = getPythonAgentUrl();
   await fetch(`${agentUrl}/routine/reload`, { method: "POST" }).catch(() => {});
 
   return Response.json({ ok: true });

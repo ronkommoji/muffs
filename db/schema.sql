@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_count INTEGER DEFAULT 0,
   context_percentage REAL,
   context_max_tokens INTEGER,
-  status TEXT DEFAULT 'active'
+  status TEXT DEFAULT 'active',
+  kind TEXT DEFAULT 'general'
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -40,6 +41,16 @@ CREATE TABLE IF NOT EXISTS routines (
   last_run_at DATETIME,
   last_run_status TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS routine_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  routine_id INTEGER NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+  started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  finished_at DATETIME,
+  status TEXT NOT NULL,
+  output_excerpt TEXT,
+  error TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (

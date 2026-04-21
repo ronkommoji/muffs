@@ -8,7 +8,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
       <TooltipProvider>
-        <SidebarProvider>{children}</SidebarProvider>
+        <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+          {children}
+        </SidebarProvider>
       </TooltipProvider>
     </ThemeProvider>
   );

@@ -1,21 +1,16 @@
-import { getSetting } from "@/lib/db";
+/** Sendblue credentials: environment only (never SQLite). */
 
-interface Creds {
-  apiKeyId: string;
-  apiSecretKey: string;
-  fromNumber: string;
-}
-
-function getCreds(): Creds {
+export function getSendblueEnv() {
   return {
-    apiKeyId: getSetting("sendblue_api_key") || process.env.SENDBLUE_API_KEY_ID || "",
-    apiSecretKey: getSetting("sendblue_api_secret") || process.env.SENDBLUE_API_SECRET_KEY || "",
-    fromNumber: getSetting("sendblue_from") || process.env.SENDBLUE_FROM_NUMBER || "",
+    apiKeyId: process.env.SENDBLUE_API_KEY_ID ?? "",
+    apiSecretKey: process.env.SENDBLUE_API_SECRET_KEY ?? "",
+    fromNumber: process.env.SENDBLUE_FROM_NUMBER ?? "",
+    toNumber: process.env.SENDBLUE_TO_NUMBER ?? "",
   };
 }
 
 export async function sendMessage(content: string, toNumber: string): Promise<void> {
-  const { apiKeyId, apiSecretKey, fromNumber } = getCreds();
+  const { apiKeyId, apiSecretKey, fromNumber } = getSendblueEnv();
   if (!apiKeyId || !apiSecretKey || !fromNumber) {
     console.warn("Sendblue credentials not configured — skipping send");
     return;

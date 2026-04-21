@@ -2,19 +2,15 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with `[create-next-
 
 ## Getting Started
 
-First, run the development server:
+From the **repository root**, `muffs-agent` starts Next.js on **http://localhost:3141** (and the FastAPI agent on 8141). See the root `README.md`.
+
+To run **only** the dashboard (when the Python agent runs elsewhere):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev -- -p 3141
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Ensure `PYTHON_AGENT_URL` in `.env` points at the agent (default with `muffs-agent`: `http://127.0.0.1:8141`).
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

@@ -1,6 +1,6 @@
-Start a new session.
+Start a fresh session (mirrors what users text as `/new` to the Muffs product agent).
 
-1. If there's an active session, write a brief summary of important ongoing context to the Agent Notes section of `agent/memory/memory.md`. Be concise — one to three bullet points max. Only write things worth remembering across sessions.
+1. If there's an active session, write a brief summary of important ongoing context to the Agent Notes section of `agentMuffs/memory/memory.md` (or `MEMORY_PATH`). Be concise — one to three bullet points max. Only write things worth remembering across sessions.
 
 2. Close the current session gracefully.
 

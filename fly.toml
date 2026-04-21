@@ -9,7 +9,8 @@ primary_region = "iad"
   destination = "/data"
 
 [env]
-  DB_PATH = "/data/muffs.db"
+  # Single volume root; DB + memory live under /data/db and /data/workspace/… (see agentMuffs/workspace.py)
+  MUFFS_WORKSPACE = "/data"
   NEXT_PUBLIC_APP_URL = "https://muffs.fly.dev"
 
 [[services]]
@@ -35,4 +36,4 @@ primary_region = "iad"
 
 [[processes]]
   name = "worker"
-  command = "python agent/agent.py"
+  command = "python -m uvicorn agentMuffs.agent:app --host 0.0.0.0 --port 8000"

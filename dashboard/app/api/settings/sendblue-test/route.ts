@@ -1,12 +1,14 @@
-import { getSetting } from "@/lib/db";
-import { testConnection } from "@/lib/sendblue";
+import { testConnection, getSendblueEnv } from "@/lib/sendblue";
 
 export const dynamic = "force-dynamic";
 
 export async function POST() {
-  const toNumber = getSetting("sendblue_to");
+  const toNumber = getSendblueEnv().toNumber;
   if (!toNumber) {
-    return Response.json({ ok: false, error: "To number not configured in settings." });
+    return Response.json({
+      ok: false,
+      error: "SENDBLUE_TO_NUMBER is not set in the environment.",
+    });
   }
   const result = await testConnection(toNumber);
   return Response.json(result);

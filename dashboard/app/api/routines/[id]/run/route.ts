@@ -1,3 +1,5 @@
+import { getPythonAgentUrl } from "@/lib/config";
+
 export const dynamic = "force-dynamic";
 
 export async function POST(
@@ -5,7 +7,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
+  const agentUrl = getPythonAgentUrl();
   try {
     await fetch(`${agentUrl}/routine/run/${id}`, { method: "POST" });
     return Response.json({ ok: true });

@@ -1,7 +1,9 @@
+import { getPythonAgentUrl } from "@/lib/config";
+
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
+  const agentUrl = getPythonAgentUrl();
   try {
     const res = await fetch(`${agentUrl}/context`, { cache: "no-store" });
     const data = await res.json();

@@ -1,14 +1,52 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { defaultDbPath, ensureWorkspaceDirs } from "@/lib/workspace-paths";
 
-const DB_PATH = process.env.DB_PATH
-  ? path.resolve(process.env.DB_PATH)
-  : path.join(process.cwd(), "..", "muffs.db");
+ensureWorkspaceDirs();
+
+function resolvedDbPath(): string {
+  const resolved = process.env.DB_PATH
+    ? path.resolve(process.env.DB_PATH)
+    : defaultDbPath();
+  if (fs.existsSync(resolved)) return resolved;
+  const legacy = path.join(process.cwd(), "..", "muffs.db");
+  if (fs.existsSync(legacy)) {
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.copyFileSync(legacy, resolved);
+  }
+  return resolved;
+}
+
+const DB_PATH = resolvedDbPath();
 
 const SCHEMA_PATH = path.join(process.cwd(), "..", "db", "schema.sql");
 
+/** Keys that formerly lived in `settings` — identity from markdown; secrets from env only. */
+const LEGACY_SETTINGS_KEYS = [
+  "user_display_name",
+  "agent_display_name",
+  "response_style",
+  "personality_notes",
+  "tone_adjustments",
+  "off_limits_topics",
+  "composio_toolkits",
+  "onboarding_completed",
+  "auto_rotate_session",
+  "sendblue_api_key",
+  "sendblue_api_secret",
+  "sendblue_from",
+  "sendblue_to",
+] as const;
+
 let _db: Database.Database | null = null;
+
+function pruneLegacySettings(db: Database.Database) {
+  const placeholders = LEGACY_SETTINGS_KEYS.map(() => "?").join(",");
+  db.prepare(`DELETE FROM settings WHERE key IN (${placeholders})`).run(
+    ...LEGACY_SETTINGS_KEYS
+  );
+}
 
 export function getDb(): Database.Database {
   if (!_db) {
@@ -21,8 +59,24 @@ export function getDb(): Database.Database {
       _db.exec(schema);
     }
     migrateSessionsTable(_db);
+    migrateRoutineRunsTable(_db);
+    pruneLegacySettings(_db);
   }
   return _db;
+}
+
+function migrateRoutineRunsTable(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS routine_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      routine_id INTEGER NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+      started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      finished_at DATETIME,
+      status TEXT NOT NULL,
+      output_excerpt TEXT,
+      error TEXT
+    )
+  `);
 }
 
 function migrateSessionsTable(db: Database.Database) {
@@ -35,6 +89,9 @@ function migrateSessionsTable(db: Database.Database) {
   }
   if (!cols.some((c) => c.name === "context_max_tokens")) {
     db.exec("ALTER TABLE sessions ADD COLUMN context_max_tokens INTEGER");
+  }
+  if (!cols.some((c) => c.name === "kind")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT DEFAULT 'general'");
   }
   db.prepare(
     `UPDATE sessions SET title = (
@@ -88,6 +145,7 @@ export interface Session {
   context_max_tokens: number | null;
   status: string;
   title: string | null;
+  kind: string | null;
 }
 
 export interface Message {
@@ -130,18 +188,3 @@ export interface Integration {
   metadata: string | null;
 }
 
-export function getSetting(key: string, defaultValue = ""): string {
-  const db = getDb();
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value ?? defaultValue;
-}
-
-export function setSetting(key: string, value: string): void {
-  getDb()
-    .prepare(
-      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP"
-    )
-    .run(key, value);
-}
