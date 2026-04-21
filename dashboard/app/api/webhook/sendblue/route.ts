@@ -1,4 +1,4 @@
-import { getDb, getSetting } from "@/lib/db";
+import { getDb, getSetting, maybeSetSessionTitleFromFirstMessage } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +30,7 @@ export async function POST(req: Request) {
   db.prepare(
     "INSERT INTO messages (session_id, role, content, source) VALUES (?, 'user', ?, 'sendblue')"
   ).run(session.id, content);
+  maybeSetSessionTitleFromFirstMessage(session.id);
 
   const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";
 

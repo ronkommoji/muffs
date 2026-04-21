@@ -159,8 +159,13 @@ export default function IntegrationsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Integrations</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Connect apps and services for Muffs to use
+        <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+          Connect accounts here (OAuth via Composio). For the Python agent to actually load
+          those tools over MCP, set{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">COMPOSIO_TOOLKITS</code> on
+          the agent server to the same slugs (e.g.{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">gmail,googlecalendar</code>
+          ), then restart the agent.
         </p>
       </div>
 

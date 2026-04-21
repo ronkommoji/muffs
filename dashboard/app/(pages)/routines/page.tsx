@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Play, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
 
 interface Routine {
   id: number;
@@ -29,6 +29,8 @@ interface Routine {
 
 export default function RoutinesPage() {
   const [routines, setRoutines] = useState<Routine[]>([]);
+  const [runningId, setRunningId] = useState<number | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   async function load() {
     const res = await fetch("/api/routines");
@@ -51,8 +53,22 @@ export default function RoutinesPage() {
   }
 
   async function runNow(id: number) {
-    await fetch(`/api/routines/${id}/run`, { method: "POST" });
-    load();
+    setRunError(null);
+    setRunningId(id);
+    try {
+      const res = await fetch(`/api/routines/${id}/run`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRunError(
+          typeof data?.error === "string" ? data.error : "Run failed"
+        );
+      }
+    } catch (e) {
+      setRunError(e instanceof Error ? e.message : "Run failed");
+    } finally {
+      setRunningId(null);
+      load();
+    }
   }
 
   async function remove(id: number) {
@@ -74,6 +90,12 @@ export default function RoutinesPage() {
           New routine
         </Button>
       </div>
+
+      {runError && (
+        <p className="text-sm text-destructive" role="alert">
+          {runError}
+        </p>
+      )}
 
       {routines.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -115,7 +137,12 @@ export default function RoutinesPage() {
                     : "Never"}
                 </TableCell>
                 <TableCell>
-                  {r.last_run_status ? (
+                  {runningId === r.id ? (
+                    <Badge variant="outline" className="gap-1 font-normal">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Running
+                    </Badge>
+                  ) : r.last_run_status ? (
                     <Badge
                       variant={
                         r.last_run_status === "success"
@@ -142,15 +169,39 @@ export default function RoutinesPage() {
                       size="icon"
                       className="h-7 w-7"
                       onClick={() => runNow(r.id)}
-                      title="Run now"
+                      disabled={runningId !== null}
+                      title={
+                        runningId === r.id ? "Running…" : "Run now"
+                      }
+                      aria-busy={runningId === r.id}
                     >
-                      <Play className="h-3.5 w-3.5" />
+                      {runningId === r.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      render={
+                        <Link
+                          href={`/routines/${r.id}/edit`}
+                          aria-label="Edit routine"
+                        />
+                      }
+                      nativeButton={false}
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-destructive"
                       onClick={() => remove(r.id)}
+                      disabled={runningId === r.id}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>

@@ -1,9 +1,12 @@
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   sdk_session_id TEXT,
+  title TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   token_count INTEGER DEFAULT 0,
+  context_percentage REAL,
+  context_max_tokens INTEGER,
   status TEXT DEFAULT 'active'
 );
 

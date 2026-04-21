@@ -2,6 +2,20 @@ import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const row = getDb()
+    .prepare("SELECT * FROM routines WHERE id=?")
+    .get(id) as Record<string, unknown> | undefined;
+  if (!row) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+  return Response.json(row);
+}
+
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }

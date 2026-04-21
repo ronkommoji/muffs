@@ -33,7 +33,6 @@ export default function SettingsPage() {
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
   const [testError, setTestError] = useState("");
   const [autoRotate, setAutoRotate] = useState(true);
-  const [contextUsage, setContextUsage] = useState<{ percentage: number; totalTokens: number } | null>(null);
   const [copied, setCopied] = useState(false);
 
   async function loadSettings() {
@@ -86,17 +85,6 @@ export default function SettingsPage() {
     }
     setTimeout(() => setTestStatus("idle"), 6000);
   }
-
-  async function loadContextUsage() {
-    try {
-      const res = await fetch("/api/context");
-      setContextUsage(await res.json());
-    } catch {}
-  }
-
-  useEffect(() => {
-    loadContextUsage();
-  }, []);
 
   const webhookUrl = `${APP_URL}/api/webhook/sendblue`;
 
@@ -263,26 +251,6 @@ export default function SettingsPage() {
               }}
             />
           </div>
-
-          {contextUsage && (
-            <Card>
-              <CardContent className="pt-4 space-y-2">
-                <div className="text-sm font-medium">Current context usage</div>
-                <div className="text-2xl font-bold">
-                  {contextUsage.percentage.toFixed(1)}%
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {contextUsage.totalTokens.toLocaleString()} tokens used
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all"
-                    style={{ width: `${Math.min(contextUsage.percentage, 100)}%` }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </TabsContent>
 
         {/* Sendblue tab */}

@@ -4,7 +4,7 @@ Keep it brief and conversational. Don't present a form — have a real exchange.
 
 Collect in order, one at a time:
 1. Their name (how they want to be addressed)
-2. Their timezone
+2. Their timezone — prefer an IANA name (e.g. America/New_York) if they know it; otherwise note what they use (EST, Pacific, etc.)
 3. How they like to communicate — do they want brief updates or more context? Formal or casual?
 4. Any standing context they want you to always know (recurring commitments, preferences, things to never bring up, etc.)
 

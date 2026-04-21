@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, maybeSetSessionTitleFromFirstMessage } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -16,14 +16,18 @@ export async function GET(req: Request) {
     return Response.json(messages);
   }
 
-  // Return all sessions with latest message preview
   const sessions = db
     .prepare(
-      `SELECT s.id, s.created_at, s.status,
-              m.content as preview, m.role as preview_role
+      `SELECT s.id, s.created_at, s.status, s.title,
+              s.token_count, s.context_percentage, s.context_max_tokens,
+              m.content as preview, m.role as preview_role,
+              fm.content as first_message
        FROM sessions s
        LEFT JOIN messages m ON m.id = (
          SELECT id FROM messages WHERE session_id = s.id ORDER BY created_at DESC LIMIT 1
+       )
+       LEFT JOIN messages fm ON fm.id = (
+         SELECT id FROM messages WHERE session_id = s.id ORDER BY created_at ASC LIMIT 1
        )
        ORDER BY s.updated_at DESC`
     )
@@ -38,6 +42,7 @@ export async function POST(req: Request) {
   db.prepare(
     "INSERT INTO messages (session_id, role, content, source) VALUES (?, 'user', ?, 'dashboard')"
   ).run(session_id, content);
+  maybeSetSessionTitleFromFirstMessage(session_id);
 
   // Fire-and-forget: agent writes the response back to DB, chat polls pick it up
   const agentUrl = process.env.PYTHON_AGENT_URL ?? "http://localhost:8000";

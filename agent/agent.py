@@ -5,12 +5,16 @@ Runs on port 8000. Shares SQLite with the Next.js dashboard.
 
 import asyncio
 import json
+import logging
 import os
 import re
 import sqlite3
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,6 +23,39 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 load_dotenv()
+
+# Fix SDK control response shape for get_context_usage (see sdk_context_patch.py)
+_agent_dir = Path(__file__).resolve().parent
+if str(_agent_dir) not in sys.path:
+    sys.path.insert(0, str(_agent_dir))
+from sdk_context_patch import apply_sdk_context_response_patch
+
+apply_sdk_context_response_patch()
+
+
+def _normalize_context_usage(usage: dict[str, Any]) -> tuple[int, float, int]:
+    """Return (total_tokens, percentage, max_tokens) from SDK dict (camelCase or snake_case)."""
+    if not usage:
+        return 0, 0.0, 0
+    nested = usage.get("response")
+    if isinstance(nested, dict):
+        usage = {**usage, **nested}
+    total = int(usage.get("totalTokens") or usage.get("total_tokens") or 0)
+    mx = int(
+        usage.get("maxTokens")
+        or usage.get("max_tokens")
+        or usage.get("rawMaxTokens")
+        or usage.get("raw_max_tokens")
+        or 0
+    )
+    pct = float(usage.get("percentage") or usage.get("percent") or 0)
+    if mx == 0 and total > 0:
+        raw = int(usage.get("rawMaxTokens") or usage.get("raw_max_tokens") or 0)
+        if raw > 0:
+            mx = raw
+    if pct == 0 and mx > 0 and total > 0:
+        pct = min(100.0, (total / mx) * 100.0)
+    return total, pct, mx
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -44,6 +81,28 @@ def init_db():
     schema = (ROOT / "db" / "schema.sql").read_text()
     with _get_db() as conn:
         conn.executescript(schema)
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "title" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
+        if "context_percentage" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN context_percentage REAL")
+        if "context_max_tokens" not in cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN context_max_tokens INTEGER")
+        conn.execute(
+            """
+            UPDATE sessions SET title = (
+              SELECT CASE
+                WHEN length(trim(replace(replace(m.content, char(10), ' '), char(13), ' '))) > 60
+                THEN substr(trim(replace(replace(m.content, char(10), ' '), char(13), ' ')), 1, 57) || '...'
+                ELSE trim(replace(replace(m.content, char(10), ' '), char(13), ' '))
+              END
+              FROM messages m WHERE m.session_id = sessions.id ORDER BY m.created_at ASC LIMIT 1
+            )
+            WHERE (title IS NULL OR trim(title) = '')
+              AND EXISTS (SELECT 1 FROM messages WHERE session_id = sessions.id)
+            """
+        )
+        conn.commit()
 
 
 def _db_write_event(session_id: str, event_type: str, tool_name: str | None, payload: dict, status: str):
@@ -64,15 +123,30 @@ def _db_write_message(session_id: str, role: str, content: str, source: str = "s
         conn.commit()
 
 
-def _db_upsert_session(session_id: str, token_count: int = 0, status: str = "active", sdk_session_id: str | None = None):
+def _db_merge_sdk_session(session_id: str, sdk_session_id: str):
+    """Store Claude SDK session id without touching token/context counters."""
     with _get_db() as conn:
         conn.execute(
-            """INSERT INTO sessions (id, sdk_session_id, token_count, status) VALUES (?, ?, ?, ?)
+            """INSERT INTO sessions (id, sdk_session_id, status) VALUES (?, ?, 'active')
                ON CONFLICT(id) DO UPDATE SET
-                 sdk_session_id=COALESCE(excluded.sdk_session_id, sdk_session_id),
-                 token_count=excluded.token_count,
+                 sdk_session_id=excluded.sdk_session_id,
                  updated_at=CURRENT_TIMESTAMP""",
-            (session_id, sdk_session_id, token_count, status),
+            (session_id, sdk_session_id),
+        )
+        conn.commit()
+
+
+def _db_update_context_usage(
+    session_id: str,
+    total_tokens: int,
+    percentage: float,
+    max_tokens: int,
+):
+    with _get_db() as conn:
+        conn.execute(
+            """UPDATE sessions SET token_count=?, context_percentage=?, context_max_tokens=?,
+                   updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            (total_tokens, percentage, max_tokens, session_id),
         )
         conn.commit()
 
@@ -145,6 +219,164 @@ def _get_sendblue_creds() -> dict:
 # Prompt builder
 # ---------------------------------------------------------------------------
 
+# Display names for Composio toolkit slugs (keep in sync with dashboard INTEGRATION_META)
+_COMPOSIO_TOOLKIT_LABELS: dict[str, str] = {
+    "gmail": "Gmail",
+    "googlecalendar": "Google Calendar",
+    "googledrive": "Google Drive",
+    "googledocs": "Google Docs",
+    "googlesheets": "Google Sheets",
+    "notion": "Notion",
+    "slack": "Slack",
+    "outlook": "Outlook",
+    "linear": "Linear",
+    "jira": "Jira",
+    "trello": "Trello",
+    "airtable": "Airtable",
+    "github": "GitHub",
+    "supabase": "Supabase",
+    "hubspot": "HubSpot",
+    "twitter": "X (Twitter)",
+    "linkedin": "LinkedIn",
+    "youtube": "YouTube",
+    "discord": "Discord",
+    "spotify": "Spotify",
+    "perplexityai": "Perplexity AI",
+    "serpapi": "SerpAPI",
+    "firecrawl": "Firecrawl",
+    "figma": "Figma",
+    "zoom": "Zoom",
+    "dropbox": "Dropbox",
+    "stripe": "Stripe",
+    "google-calendar": "Google Calendar",
+    "google-drive": "Google Drive",
+}
+
+
+def _append_composio_tool_truth(system_prompt: str, loaded_slugs: list[str]) -> str:
+    """Ground the model in which Composio tools are actually mounted (avoids capability hallucination)."""
+    if loaded_slugs:
+        labels = [_COMPOSIO_TOOLKIT_LABELS.get(s, s) for s in loaded_slugs]
+        lines = "\n".join(f"- {lb}" for lb in labels)
+        return (
+            system_prompt
+            + "\n\n## External integrations (authoritative)\n"
+            + "These are the ONLY third-party services you have as callable Composio tools "
+            + "in this session:\n"
+            + f"{lines}\n\n"
+            + "When describing what you can do, mention only these integrations for "
+            + "email/calendar/files/comms/etc. Do not claim Slack, Notion, Figma, Google Drive, "
+            + "web browsing, or other products unless they appear in the list above. "
+            + "You may still help with general advice from training knowledge, but do not "
+            + "imply you can take actions in apps that are not listed."
+        )
+    return (
+        system_prompt
+        + "\n\n## External integrations (authoritative)\n"
+        + "No Composio toolkits are loaded in this agent process (missing or empty "
+        + "COMPOSIO_TOOLKITS, load error, or no tools returned). You do not have API-backed "
+        + "tools for Gmail, Calendar, or other integrations unless they get loaded. "
+        + "Do not claim specific app integrations. If the user connected accounts in the "
+        + "dashboard, explain that the agent server needs COMPOSIO_TOOLKITS set to matching "
+        + "slugs (e.g. gmail,googlecalendar) and a restart."
+    )
+
+
+# Common timezone labels from User Facts → IANA (best-effort; full names work via ZoneInfo)
+_TZ_ALIASES: dict[str, str] = {
+    "EST": "America/New_York",
+    "EDT": "America/New_York",
+    "ET": "America/New_York",
+    "EASTERN": "America/New_York",
+    "CST": "America/Chicago",
+    "CDT": "America/Chicago",
+    "CT": "America/Chicago",
+    "CENTRAL": "America/Chicago",
+    "MST": "America/Denver",
+    "MDT": "America/Denver",
+    "MT": "America/Denver",
+    "MOUNTAIN": "America/Denver",
+    "PST": "America/Los_Angeles",
+    "PDT": "America/Los_Angeles",
+    "PT": "America/Los_Angeles",
+    "PACIFIC": "America/Los_Angeles",
+    "GMT": "UTC",
+    "UTC": "UTC",
+    "UK": "Europe/London",
+    "BST": "Europe/London",
+}
+
+
+def _user_timezone_raw_from_memory() -> str:
+    memory = MEMORY_PATH.read_text() if MEMORY_PATH.exists() else ""
+    if not memory:
+        return ""
+    uf_match = re.search(r"## User Facts\n(.*?)(?=## |\Z)", memory, re.DOTALL)
+    if not uf_match:
+        return ""
+    block = uf_match.group(1)
+    m = re.search(r"^\s*-\s*Timezone:\s*(.+)$", block, re.MULTILINE | re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
+def _resolve_user_local_now(tz_raw: str) -> tuple[datetime, str]:
+    """Return (aware local now, label for the prompt)."""
+    raw = tz_raw.strip()
+    if not raw:
+        z = ZoneInfo("UTC")
+        return datetime.now(z), "UTC (set timezone in User Facts via /setup)"
+
+    try:
+        z = ZoneInfo(raw)
+        return datetime.now(z), raw
+    except Exception:
+        pass
+
+    key = raw.upper().replace(" ", "_")
+    if key in _TZ_ALIASES:
+        iana = _TZ_ALIASES[key]
+        z = ZoneInfo(iana)
+        return datetime.now(z), f"{raw} ({iana})"
+
+    z = ZoneInfo("UTC")
+    return datetime.now(z), f"{raw} (unrecognized; showing UTC)"
+
+
+def _append_current_datetime_context(system_prompt: str) -> str:
+    tz_raw = _user_timezone_raw_from_memory()
+    local_now, tz_label = _resolve_user_local_now(tz_raw)
+    utc_now = datetime.now(timezone.utc)
+    pretty_local = local_now.strftime("%A, %B %d, %Y · %I:%M %p")
+    block = (
+        "\n\n## Current time (authoritative)\n"
+        "Use this block for anything about “today”, dates, or scheduling. Do not guess the calendar date.\n\n"
+        f"- User local ({tz_label}): {pretty_local}\n"
+        f"- UTC (ISO 8601): {utc_now.isoformat(timespec='seconds')}\n"
+    )
+    return system_prompt + block
+
+
+def _assistant_plaintext(text: str) -> str:
+    """Strip common Markdown so iMessage and the dashboard stay readable."""
+    if not text or not text.strip():
+        return text
+
+    def _unfence(m: re.Match[str]) -> str:
+        return (m.group(1) or "").strip()
+
+    t = re.sub(r"```(?:\w*\n)?([\s\S]*?)```", _unfence, text)
+    t = re.sub(r"`([^`]+)`", r"\1", t)
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    t = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", t)
+    t = re.sub(r"(?<!_)_([^_]+)_(?!_)", r"\1", t)
+    t = re.sub(r"^#{1,6}\s*(.+)$", r"\1", t, flags=re.MULTILINE)
+    t = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", t)
+    t = re.sub(r"^---+$\s?", "", t, flags=re.MULTILINE)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
 def _build_system_prompt(override: str | None = None) -> str:
     if override:
         return override
@@ -216,6 +448,7 @@ async def run_agent(
     session_id: str | None = None,
     system_prompt_override: str | None = None,
     send_via_sendblue: bool = True,
+    normalize_assistant_text: bool = True,
 ) -> tuple[str, str]:
     """Run the agent with the given message. Returns (response_text, session_id)."""
     from claude_agent_sdk import (
@@ -225,26 +458,38 @@ async def run_agent(
         ResultMessage,
         TextBlock,
         ToolUseBlock,
-        create_sdk_mcp_server,
     )
 
     system_prompt = _build_system_prompt(system_prompt_override)
 
-    # Build Composio MCP server if API key is set
-    mcp_servers = {}
+    # Composio MCP: use ClaudeAgentSDKProvider + tools.get() → SdkMcpTool list (not raw dicts).
+    mcp_servers: dict[str, Any] = {}
+    loaded_composio_toolkits: list[str] = []
     composio_key = os.getenv("COMPOSIO_API_KEY")
     if composio_key:
         try:
             from composio import Composio
-            composio = Composio(api_key=composio_key)
-            comp_session = composio.create(user_id="default")
-            tools = comp_session.tools()
-            if tools:
-                mcp_servers["composio"] = create_sdk_mcp_server(
-                    name="composio", version="1.0.0", tools=tools
+            from composio_claude_agent_sdk import ClaudeAgentSDKProvider
+
+            toolkit_raw = os.getenv("COMPOSIO_TOOLKITS", "")
+            toolkits = [t.strip() for t in toolkit_raw.split(",") if t.strip()]
+            if not toolkits:
+                print(
+                    "Composio: set COMPOSIO_TOOLKITS (comma-separated slugs, e.g. gmail,slack) "
+                    "to load MCP tools; continuing without Composio tools."
                 )
+            else:
+                provider = ClaudeAgentSDKProvider()
+                composio = Composio(api_key=composio_key, provider=provider)
+                wrapped = composio.tools.get(user_id="default", toolkits=toolkits)
+                if wrapped:
+                    mcp_servers["composio"] = provider.create_mcp_server(wrapped)
+                    loaded_composio_toolkits = toolkits
         except Exception as e:
             print(f"Composio init error (continuing without tools): {e}")
+
+    system_prompt = _append_composio_tool_truth(system_prompt, loaded_composio_toolkits)
+    system_prompt = _append_current_datetime_context(system_prompt)
 
     # dashboard_session_id: the ID used for DB message storage (stays constant)
     # sdk_session_id: the ID the Claude SDK assigns (used for resumption)
@@ -305,27 +550,37 @@ async def run_agent(
                 )
                 if sid:
                     sdk_session_id = sid
-                    await asyncio.to_thread(
-                        _db_upsert_session, dashboard_session_id, sdk_session_id=sid
-                    )
+                    await asyncio.to_thread(_db_merge_sdk_session, dashboard_session_id, sid)
 
         # Check context usage and auto-rotate if > 90%
         try:
-            usage = await client.get_context_usage()
-            pct = usage.get("percentage", 0)
-            total = usage.get("totalTokens", 0)
-            await asyncio.to_thread(_db_upsert_session, dashboard_session_id, token_count=total)
+            raw_usage = await client.get_context_usage()
+            total, pct, max_toks = _normalize_context_usage(
+                raw_usage if isinstance(raw_usage, dict) else {}
+            )
+            await asyncio.to_thread(
+                _db_update_context_usage,
+                dashboard_session_id,
+                total,
+                pct,
+                max_toks,
+            )
             if pct > 90:
                 auto_rotate_setting = _db_get_setting("auto_rotate_session", "true")
                 if auto_rotate_setting.lower() == "true":
                     await asyncio.to_thread(_db_close_session, dashboard_session_id)
                     await send_sendblue_message(
-                        "Context window nearly full — starting a fresh session. What else do you need?"
+                        "Heads up — we're almost out of room in this chat, so I'm starting fresh. "
+                        "What do you need?"
                     )
         except Exception:
-            pass
+            logging.exception(
+                "get_context_usage / persist failed for session %s", dashboard_session_id
+            )
 
     if response_text:
+        if normalize_assistant_text:
+            response_text = _assistant_plaintext(response_text)
         await asyncio.to_thread(
             _db_write_message, dashboard_session_id, "assistant", response_text, "agent"
         )
@@ -423,6 +678,11 @@ class ConnectIntegrationRequest(BaseModel):
     user_id: str = "default"
 
 
+@app.get("/")
+async def root():
+    return {"service": "muffs-agent", "health": "/health", "docs": "/docs"}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
@@ -469,8 +729,9 @@ async def context_usage():
 
     options = ClaudeAgentOptions(resume=sdk_session_id)
     async with ClaudeSDKClient(options=options) as client:
-        usage = await client.get_context_usage()
-    return usage
+        raw = await client.get_context_usage()
+    total, pct, mx = _normalize_context_usage(raw if isinstance(raw, dict) else {})
+    return {"percentage": pct, "totalTokens": total, "maxTokens": mx}
 
 
 @app.post("/routine/run/{routine_id}")
@@ -495,6 +756,7 @@ async def generate_routine_prompt(req: GenerateRoutinePromptRequest):
         message="Generate the routine system prompt as instructed.",
         system_prompt_override=filled,
         send_via_sendblue=False,
+        normalize_assistant_text=False,
     )
     return {"prompt": text}
 
@@ -507,7 +769,9 @@ async def connect_integration(req: ConnectIntegrationRequest):
     try:
         from composio import Composio
         composio = Composio(api_key=composio_key)
-        session = composio.create(user_id=req.user_id, toolkits=[req.toolkit])
+        session = composio.tool_router.create(
+            user_id=req.user_id, toolkits=[req.toolkit]
+        )
         connection_request = session.authorize(req.toolkit)
         return {"redirect_url": connection_request.redirect_url}
     except Exception as e:
@@ -522,7 +786,7 @@ async def list_integrations():
     try:
         from composio import Composio
         composio = Composio(api_key=composio_key)
-        session = composio.create(user_id="default")
+        session = composio.tool_router.create(user_id="default")
         toolkits = session.toolkits()
         return {
             "items": [
