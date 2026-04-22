@@ -761,8 +761,36 @@ async def run_agent(
                 composio = Composio(api_key=composio_key, provider=provider)
                 wrapped = composio.tools.get(user_id="default", toolkits=toolkits)
                 if wrapped:
-                    mcp_servers["composio"] = provider.create_mcp_server(wrapped)
-                    loaded_composio_toolkits = toolkits
+                    # Security: composio.tools.get() may return tools from ALL connected
+                    # accounts, not just the requested toolkits. Explicitly filter to only
+                    # tools whose names start with an allowed toolkit prefix so that services
+                    # connected via the Composio dashboard (or another app sharing the same
+                    # API key / user_id) are never mounted without being listed in
+                    # COMPOSIO_TOOLKITS / preferences.json.
+                    # Composio tool names follow the TOOLKIT_ACTION convention, e.g.:
+                    #   GMAIL_SEND_EMAIL, GOOGLECALENDAR_LIST_EVENTS, GOOGLEDRIVE_FIND_FILE
+                    allowed_prefixes = tuple(t.upper() + "_" for t in toolkits)
+                    filtered_tools = [
+                        t for t in wrapped
+                        if getattr(t, "name", "").upper().startswith(allowed_prefixes)
+                    ]
+                    extra = len(wrapped) - len(filtered_tools)
+                    if extra > 0:
+                        print(
+                            f"[Security] composio.tools.get() returned {extra} tool(s) from "
+                            f"un-configured toolkits — filtered out. Check your Composio account "
+                            f"for unexpected connected services."
+                        )
+                    if filtered_tools:
+                        mcp_servers["composio"] = provider.create_mcp_server(filtered_tools)
+                        # Derive loaded slugs from what was actually mounted, not just the input list.
+                        mounted_slugs = {
+                            getattr(t, "name", "").split("_")[0].lower()
+                            for t in filtered_tools
+                        }
+                        loaded_composio_toolkits = [
+                            slug for slug in toolkits if slug.lower() in mounted_slugs
+                        ]
         except Exception as e:
             print(f"Composio init error (continuing without tools): {e}")
 
