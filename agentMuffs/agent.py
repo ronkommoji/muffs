@@ -788,6 +788,8 @@ async def run_agent(
         permission_mode="bypassPermissions",
         mcp_servers=mcp_servers if mcp_servers else None,
         resume=resume_id,
+        setting_sources=["project"],
+        allowed_tools=["Skill"],
     )
 
     response_text = ""

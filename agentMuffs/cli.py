@@ -62,6 +62,7 @@ def _parse_args() -> argparse.Namespace:
 def _run_agent_only(host: str, port: int, reload: bool) -> None:
     import uvicorn
 
+    os.chdir(ROOT / "agentMuffs")
     uvicorn.run(
         "agentMuffs.agent:app",
         host=host,
@@ -107,7 +108,7 @@ def _spawn_agent(args: argparse.Namespace, *, uvicorn_reload: bool) -> subproces
     ]
     if uvicorn_reload:
         cmd.append("--reload")
-    return subprocess.Popen(cmd, cwd=str(ROOT))
+    return subprocess.Popen(cmd, cwd=str(ROOT / "agentMuffs"))
 
 
 def _spawn_dashboard(agent_port: int, dashboard_port: int) -> subprocess.Popen:
