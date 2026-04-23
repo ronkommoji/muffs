@@ -1,0 +1,33 @@
+{
+  "_comment": "Copy to ~/.nanobot/config.json and fill in your credentials.",
+
+  "agents": {
+    "model": "kimi-k2.6",
+    "temperature": 1.0
+  },
+
+  "providers": {
+    "moonshot": {
+      "api_key": "YOUR_MOONSHOT_API_KEY"
+    }
+  },
+
+  "channels": {
+    "imessage": {
+      "enabled": true,
+
+      "api_key_id": "YOUR_SENDBLUE_API_KEY_ID",
+      "api_secret_key": "YOUR_SENDBLUE_API_SECRET_KEY",
+
+      "from_number": "+15551234567",
+
+      "allow_from": ["+15559876543"],
+
+      "webhook_host": "0.0.0.0",
+      "webhook_port": 8765,
+      "webhook_path": "/webhook/sendblue",
+
+      "send_typing_indicator": true
+    }
+  }
+}
